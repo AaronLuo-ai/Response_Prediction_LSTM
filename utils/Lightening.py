@@ -29,6 +29,12 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
         # Metrics
         self.accuracy = torchmetrics.Accuracy(task="binary")
         self.auroc = torchmetrics.AUROC(task="binary")
+        self.train_loss = []
+        self.val_loss = []
+        self.train_acc = []
+        self.val_acc = []
+        self.train_auroc = []
+        self.val_auroc = []
 
     def forward(self, x1, x2):
         batch_size, channel, H, W = x1.shape  # x1 and x2 are both (B, 256, 256)
@@ -41,10 +47,12 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss, acc, auroc = self.common_step(batch, batch_idx)
         # Log loss & metrics
+        self.train_loss.append(loss)
+        self.train_acc.append(acc)
+        self.train_auroc.append(auroc)
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log("train_acc", acc, prog_bar=True, on_epoch=True)
         self.log("train_auroc", auroc, prog_bar=True, on_epoch=True)
-
         return loss
 
     def common_step(self, batch, batch_idx):
@@ -57,20 +65,37 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
         auroc = self.auroc(probs, y)  # Pass probabilities, not binary values
         return loss, acc, auroc
 
-    def validation_step(self, batch, batch_idx):
-        loss, acc, auroc = self.common_step(batch, batch_idx)
-        return {"val_loss": loss, "val_acc": acc, "val_auroc": auroc}
-
-    def validation_epoch_end(self, outputs):
-        # Aggregate the results from the validation_step
-        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        avg_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
-        avg_auroc = torch.stack([x["val_auroc"] for x in outputs]).mean()
-
+    def on_train_epoch_end(self):
+        avg_loss = torch.mean(torch.tensor(self.train_loss, dtype=torch.float32)).item()
+        avg_acc = torch.mean(torch.tensor(self.train_acc, dtype=torch.float32)).item()
+        avg_auroc = torch.mean(
+            torch.tensor(self.train_auroc, dtype=torch.float32)
+        ).item()
         # Log the average metrics
         self.log("val_loss", avg_loss, prog_bar=True)
         self.log("val_acc", avg_acc, prog_bar=True)
         self.log("val_auroc", avg_auroc, prog_bar=True)
+        self.train_loss.clear()
+        self.train_acc.clear()
+        self.train_auroc.clear()
+
+    def validation_step(self, batch, batch_idx):
+        loss, acc, auroc = self.common_step(batch, batch_idx)
+        self.val_loss.append(loss)
+        self.val_acc.append(acc)
+        self.val_auroc.append(auroc)
+
+    def on_validation_epoch_end(self):
+        avg_loss = torch.mean(torch.tensor(self.val_loss, dtype=torch.float32)).item()
+        avg_acc = torch.mean(torch.tensor(self.val_acc, dtype=torch.float32)).item()
+        avg_auroc = torch.mean(torch.tensor(self.val_auroc, dtype=torch.float32)).item()
+        # Log the average metrics
+        self.log("val_loss", avg_loss, prog_bar=True)
+        self.log("val_acc", avg_acc, prog_bar=True)
+        self.log("val_auroc", avg_auroc, prog_bar=True)
+        self.val_loss.clear()
+        self.val_acc.clear()
+        self.val_auroc.clear()
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.hparams.lr)

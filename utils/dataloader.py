@@ -80,12 +80,20 @@ class TwoPartDataset(Dataset):
             response_list = response_list[: int(len(response_list) * 0.75)]
             no_response_list = no_response_list[: int(len(no_response_list) * 0.75)]
             combined_list = response_list + no_response_list
+            print("Train")
+            print("response list", len(response_list))
+            print("no response list", len(no_response_list))
         else:
             response_list = response_list[: int(len(response_list) * 0.75) + 1]
             no_response_list = no_response_list[: int(len(no_response_list) * 0.75) + 1]
             combined_list = response_list + no_response_list
+            print("Test")
+            print("response list", len(response_list))
+            print("no response list", len(no_response_list))
 
         self.patient_data = []
+        num_response = 0
+        total_response = 0
         patients = set(f.split("_MR")[0] for f in combined_list)
         for patient in sorted(patients):
             mr1_path = self.data_dir / Path(f"{patient}_MR1_images.nrrd")
@@ -110,6 +118,9 @@ class TwoPartDataset(Dataset):
                         "response": response,
                     }
                 )
+                num_response += 1 if response == 1 else 0
+                total_response += 1
+        print(f"{num_response/total_response}%", response)
 
     def __len__(self):
         return len(self.patient_data)

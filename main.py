@@ -9,13 +9,16 @@ from utils.dataloader import TwoPartDataset
 from utils.Lightening import LSTMTimeSeriesClassifier
 
 
+# TODO: Relabel the data. 0,1 --> Response, 2,3 --> No Response
+
+
 def main():
 
     batch_size = 10
     num_workers = 4
-    max_epochs = 50
+    max_epochs = 3
     min_epochs = 1
-    check_val_every_n_epoch = 5
+    check_val_every_n_epoch = 2
 
     train_transform = T.Compose(
         [
@@ -69,6 +72,7 @@ def main():
         callbacks=[early_stopping, checkpoint_callback],
         num_sanity_val_steps=0,
         check_val_every_n_epoch=check_val_every_n_epoch,
+        log_every_n_steps=1,
     )
 
     # Train and Validate
