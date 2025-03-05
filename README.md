@@ -1,16 +1,55 @@
-Rectal Cancer Treatment Response Prediction
-Overview
-This project focuses on predicting the post-treatment response of rectal cancer patients using pre- and post-treatment MRI scans. The goal is to leverage machine learning techniques to analyze imaging data and provide insights into treatment outcomes, which can assist clinicians in making informed decisions.
 
-Dataset
-The dataset consists of MRI scans from rectal cancer patients, including both pre-treatment (MR1) and post-treatment (MR2) images. Each patient has corresponding image and mask files in .nrrd format. The dataset is structured as follows:
+---
 
-Pre-treatment MRI: cnda_pXXX_MR1_images.nrrd
+## 📊 Overview
 
-Post-treatment MRI: cnda_pXXX_MR2_images.nrrd
+### Objective
 
-Masks: Corresponding segmentation masks for each MRI scan.
+The project focuses on predicting tumor responses based on MRI scans before and after treatment. Specifically, it aims to predict whether a tumor will have a complete response to treatment using data from `MR1` (pre-treatment MRI) and `MR2` (post-treatment MRI). The model used is an **LSTM**, which processes these MR1 and MR2 images as sequential data.
 
-Only patients with both pre- and post-treatment data are included in the analysis to ensure a complete dataset for training and evaluation.
+---
 
-Project Structure
+### Input Data
+
+The data consists of:
+
+- **MRI images**: Stored in NRRD format (`MR1` for pre-treatment, `MR2` for post-treatment).
+- **Response labels**: Binary classification indicating the tumor's response to treatment ("Complete response" or "No response"). These labels are provided in an Excel file (`db_20241213.xlsx`).
+- **Batch information**: Contains a list of patient data including the MRI filenames, stored in a CSV file (`batch.csv`).
+
+---
+
+### Model
+
+The model consists of an **LSTM** network:
+
+1. **Input layer**: Takes in a sequence of MRI images (pre-treatment and post-treatment).
+2. **LSTM layers**: Processes the images sequentially to capture temporal patterns.
+3. **Fully connected layer**: Output layer for binary classification, predicting tumor response.
+
+---
+
+### Training
+
+The model is trained using:
+
+- **Loss function**: Binary Cross-Entropy Loss (`BCEWithLogitsLoss`).
+- **Optimizer**: Adam optimizer.
+- **Metrics**: Accuracy and AUROC (Area Under the Receiver Operating Characteristic curve).
+
+---
+
+### Logging
+
+We use **WandB** to log the training/validation loss and accuracy metrics during training.
+
+---
+
+## 🚀 Installation
+
+To set up this project, clone the repository and install the required dependencies:
+
+```bash
+git clone <repo_url>
+cd <repo_directory>
+pip install -r requirements.txt
