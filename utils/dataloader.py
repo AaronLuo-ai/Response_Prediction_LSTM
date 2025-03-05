@@ -11,24 +11,21 @@ import torch
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from torchvision.transforms import Compose
+import torchvision.transforms as T
 
-
-train_transform_reg = A.Compose(
+train_transform = T.Compose(
     [
-        A.PadIfNeeded(min_height=256, min_width=256),
-        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=5, p=0.5),
-        A.CenterCrop(256, 256),
-        A.Normalize(mean=[156.22], std=[132.88]),
-        ToTensorV2(),
+        T.CenterCrop((256, 256)),  # Crop to (256, 256)
+        T.RandomRotation(degrees=15),  # Randomly rotate ±15 degrees
+        T.Normalize(mean=[0.5], std=[0.5]),  # Normalize (replace with computed values)
     ]
 )
 
-val_transform_reg = A.Compose(
+
+test_transform = T.Compose(
     [
-        A.PadIfNeeded(min_height=256, min_width=256),
-        A.Resize(256, 256),
-        A.Normalize(mean=[156.22], std=[132.88]),
-        ToTensorV2(),
+        T.CenterCrop((256, 256)),
+        T.Normalize(mean=[0.5], std=[0.5]),
     ]
 )
 
@@ -36,13 +33,13 @@ val_transform_reg = A.Compose(
 class TwoPartDataset(Dataset):
     def __init__(
         self,
-        # root_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple",
-        # batch_path="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple\\batch.csv",
-        # response_dir=r"C:\Users\aaron.l\Documents\db_20241213.xlsx",
+        root_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple",
+        batch_path="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple\\batch.csv",
+        response_dir=r"C:\Users\aaron.l\Documents\db_20241213.xlsx",
         # This is the address of the data on my own computer (IGNORE THIS)
-        root_dir="/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple",
-        batch_path="/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple/batch.csv",
-        response_dir="/Users/luozisheng/Documents/Zhu_lab/db_20241213.xlsx",
+        # root_dir="/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple",
+        # batch_path="/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple/batch.csv",
+        # response_dir="/Users/luozisheng/Documents/Zhu_lab/db_20241213.xlsx",
         phase="train",
         transforms=None,
     ):
@@ -52,7 +49,6 @@ class TwoPartDataset(Dataset):
         self.response_dir = response_dir
         self.phase = phase
         self.transforms = transforms
-        self.num_slices = 0
 
         df = pd.read_excel(response_dir)
         df["patient_info"] = list(zip(df["cnda_session_label"], df["Tumor Response"]))
@@ -114,10 +110,9 @@ class TwoPartDataset(Dataset):
                         "response": response,
                     }
                 )
-            self.num_slices += min_slices
 
     def __len__(self):
-        return self.num_slices
+        return len(self.patient_data)
 
     def __getitem__(self, idx):
         entry = self.patient_data[idx]
@@ -126,12 +121,13 @@ class TwoPartDataset(Dataset):
         mr2 = entry["MR2"]
         response = entry["response"]  # Label (y)
 
-        mr1 = torch.tensor(mr1, dtype=torch.float32)
-        mr2 = torch.tensor(mr2, dtype=torch.float32)
+        mr1 = torch.tensor(mr1, dtype=torch.float32).unsqueeze(0)
+        mr2 = torch.tensor(mr2, dtype=torch.float32).unsqueeze(0)
 
         if self.transforms:
-            mr1 = self.transforms(image=mr1.numpy())["image"]
-            mr2 = self.transforms(image=mr2.numpy())["image"]
+            mr1 = self.transforms(mr1)
+            mr2 = self.transforms(mr2)
+
         return mr1, mr2, response
 
 
@@ -143,8 +139,9 @@ def main():
     response_dir = Path("/Users/luozisheng/Documents/Zhu_lab/db_20241213.xlsx")
     phase = "train"
 
-    dataset = TwoPartDataset(phase=phase, transforms=train_transform_reg)
+    dataset = TwoPartDataset(phase=phase, transforms=train_transform)
     Dataloader = torch.utils.data.DataLoader(dataset, batch_size=3, shuffle=True)
+    print("len(Dataloader)", len(Dataloader))
 
     for mr1_batch, mr2_batch, response_batch in Dataloader:
         batch_size = mr1_batch.shape[0]  # Number of images in batch

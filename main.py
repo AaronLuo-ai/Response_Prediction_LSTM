@@ -1,15 +1,10 @@
 import wandb
-from pathlib import Path
-import segmentation_models_pytorch as smp
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from datetime import datetime
-import torch
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
-import sys
+import torchvision.transforms as T
 from utils.dataloader import TwoPartDataset
 from utils.Lightening import LSTMTimeSeriesClassifier
 
@@ -18,33 +13,29 @@ def main():
 
     batch_size = 10
     num_workers = 4
-    max_epochs = 20
+    max_epochs = 50
     min_epochs = 1
-    check_val_every_n_epoch = 10
+    check_val_every_n_epoch = 5
 
-    train_transform_reg = A.Compose(
+    train_transform = T.Compose(
         [
-            A.PadIfNeeded(min_height=256, min_width=256),
-            A.ShiftScaleRotate(
-                shift_limit=0.05, scale_limit=0.05, rotate_limit=5, p=0.5
-            ),
-            A.CenterCrop(256, 256),
-            A.Normalize(mean=[156.22], std=[132.88]),
-            ToTensorV2(),
+            T.CenterCrop((256, 256)),  # Crop to (256, 256)
+            T.RandomRotation(degrees=15),  # Randomly rotate ±15 degrees
+            T.Normalize(
+                mean=[0.5], std=[0.5]
+            ),  # Normalize (replace with computed values)
         ]
     )
 
-    val_transform_reg = A.Compose(
+    test_transform = T.Compose(
         [
-            A.PadIfNeeded(min_height=256, min_width=256),
-            A.Resize(256, 256),
-            A.Normalize(mean=[156.22], std=[132.88]),
-            ToTensorV2(),
+            T.CenterCrop((256, 256)),
+            T.Normalize(mean=[0.5], std=[0.5]),
         ]
     )
 
-    TrainDataset = TwoPartDataset(phase="train", transforms=train_transform_reg)
-    TestDataset = TwoPartDataset(phase="test", transforms=val_transform_reg)
+    TrainDataset = TwoPartDataset(phase="train", transforms=train_transform)
+    TestDataset = TwoPartDataset(phase="test", transforms=test_transform)
 
     TrainLoader = DataLoader(
         TrainDataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
@@ -54,9 +45,9 @@ def main():
     )
 
     # Initialize Callbacks
-    early_stopping = EarlyStopping(monitor="validation/loss", patience=40, mode="min")
+    early_stopping = EarlyStopping(monitor="val_loss", patience=40, mode="min")
     checkpoint_callback = ModelCheckpoint(
-        monitor="validation/loss",
+        monitor="val_loss",
         dirpath="checkpoints/",
         filename="best-checkpoint-{epoch:02d}-{validation/loss:.4f}",
         save_top_k=1,

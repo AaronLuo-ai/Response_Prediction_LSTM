@@ -51,18 +51,26 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
         x1, x2, y = batch  # Unpack batch
         logits = self(x1, x2)  # Forward pass
         loss = self.criterion(logits, y.float())
-        preds = torch.sigmoid(logits) > 0.5  # Convert logits to binary predictions
+        probs = torch.sigmoid(logits)  # Convert logits to probabilities
+        preds = probs > 0.5  # Binary predictions for accuracy
         acc = self.accuracy(preds, y)
-        auroc = self.auroc(preds, y)
+        auroc = self.auroc(probs, y)  # Pass probabilities, not binary values
         return loss, acc, auroc
 
     def validation_step(self, batch, batch_idx):
         loss, acc, auroc = self.common_step(batch, batch_idx)
-        self.log("val_loss", loss, prog_bar=True, on_epoch=True)
-        self.log("val_acc", acc, prog_bar=True, on_epoch=True)
-        self.log("val_auroc", auroc, prog_bar=True, on_epoch=True)
+        return {"val_loss": loss, "val_acc": acc, "val_auroc": auroc}
 
-        return loss
+    def validation_epoch_end(self, outputs):
+        # Aggregate the results from the validation_step
+        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
+        avg_acc = torch.stack([x["val_acc"] for x in outputs]).mean()
+        avg_auroc = torch.stack([x["val_auroc"] for x in outputs]).mean()
+
+        # Log the average metrics
+        self.log("val_loss", avg_loss, prog_bar=True)
+        self.log("val_acc", avg_acc, prog_bar=True)
+        self.log("val_auroc", avg_auroc, prog_bar=True)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.hparams.lr)
