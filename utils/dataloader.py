@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from pathlib import Path
 import segmentation_models_pytorch as smp
 from torch.utils.data import Dataset
@@ -6,170 +7,163 @@ from torchvision import datasets, transforms
 import nrrd
 import matplotlib.pyplot as plt
 import sys
-import numpy as np
-from sklearn.model_selection import train_test_split
 import torch
-from utils.augmentation import *
-from helper import *
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+from torchvision.transforms import Compose
 
 
-class SegmentImageDataset(Dataset):
+train_transform_reg = A.Compose(
+    [
+        A.PadIfNeeded(min_height=256, min_width=256),
+        A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=5, p=0.5),
+        A.CenterCrop(256, 256),
+        A.Normalize(mean=[156.22], std=[132.88]),
+        ToTensorV2(),
+    ]
+)
+
+val_transform_reg = A.Compose(
+    [
+        A.PadIfNeeded(min_height=256, min_width=256),
+        A.Resize(256, 256),
+        A.Normalize(mean=[156.22], std=[132.88]),
+        ToTensorV2(),
+    ]
+)
+
+
+class TwoPartDataset(Dataset):
     def __init__(
-            self,
-            data_dir="./data/nrrd_images_masks_simple",
-            batch_path="./data/nrrd_images_masks_simple/batch.csv",
-            phase="train",
-            transform=None,
-            target_transform=None,
+        self,
+        # root_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple",
+        # batch_path="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple\\batch.csv",
+        # response_dir=r"C:\Users\aaron.l\Documents\db_20241213.xlsx",
+        # This is the address of the data on my own computer (IGNORE THIS)
+        root_dir="/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple",
+        batch_path="/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple/batch.csv",
+        response_dir="/Users/luozisheng/Documents/Zhu_lab/db_20241213.xlsx",
+        phase="train",
+        transforms=None,
     ):
-        self.data_dir = Path(data_dir)
-        self.batch_path = Path(batch_path)
+        self.slices = 0
+        self.data_dir = Path(root_dir)
+        self.batch_path = batch_path
+        self.response_dir = response_dir
         self.phase = phase
-        self.transform = transform
-        self.target_transform = target_transform
+        self.transforms = transforms
+        self.num_slices = 0
 
-        # Load image filenames from CSV
-        csv = pd.read_csv(self.batch_path)
-        num_lines = len(csv)
-        separation_index = int(0.75 * num_lines)
-
-        if self.phase == "train":
-            self.image_files = csv["Image"].tolist()[:separation_index]
+        df = pd.read_excel(response_dir)
+        df["patient_info"] = list(zip(df["cnda_session_label"], df["Tumor Response"]))
+        new_df = df[["patient_info"]]
+        pd.set_option("display.max_rows", None)
+        pd.set_option("display.max_columns", None)
+        new_df = new_df.drop_duplicates(subset=["patient_info"], keep="first")
+        new_df["patient_info"] = new_df["patient_info"].apply(
+            lambda x: (x[0], 1) if x[1] == "Complete response" else (x[0], 0)
+        )
+        new_df = new_df.drop_duplicates(subset=["patient_info"], keep="first")
+        csv = pd.read_csv(batch_path)
+        image_files = csv["Image"].tolist()
+        mr1_patients = set(f.split("_MR1")[0] for f in image_files if "MR1" in f)
+        mr2_patients = set(f.split("_MR2")[0] for f in image_files if "MR2" in f)
+        patients_with_both = mr1_patients.intersection(mr2_patients)
+        response_map = {
+            "_".join(x[0].split("_")[:2]): x[1]
+            for x in new_df["patient_info"]
+            if "_".join(x[0].split("_")[:2]) in patients_with_both
+        }
+        response_list = sorted(
+            [patient for patient, response in response_map.items() if response == 1]
+        )
+        no_response_list = sorted(
+            [patient for patient, response in response_map.items() if response == 0]
+        )
+        if phase == "train":
+            response_list = response_list[: int(len(response_list) * 0.75)]
+            no_response_list = no_response_list[: int(len(no_response_list) * 0.75)]
+            combined_list = response_list + no_response_list
         else:
-            self.image_files = csv["Image"].tolist()[separation_index + 1:]
+            response_list = response_list[: int(len(response_list) * 0.75) + 1]
+            no_response_list = no_response_list[: int(len(no_response_list) * 0.75) + 1]
+            combined_list = response_list + no_response_list
 
-        # List to store (image_path, mask_path, num_slices)
-        self.data = []
-        self.slice_indices = []  # Maps global index -> (file_idx, slice_idx)
+        self.patient_data = []
+        patients = set(f.split("_MR")[0] for f in combined_list)
+        for patient in sorted(patients):
+            mr1_path = self.data_dir / Path(f"{patient}_MR1_images.nrrd")
+            mr2_path = self.data_dir / Path(f"{patient}_MR2_images.nrrd")
 
-        total_slices = 0
-        for file_idx, image_file in enumerate(self.image_files):
-            image_path = self.data_dir / image_file
-            mask_file = image_file.replace("images", "masks")  # Find corresponding mask
-            mask_path = self.data_dir / mask_file
+            mr1_array, _ = nrrd.read(mr1_path)
+            mr2_array, _ = nrrd.read(mr2_path)
+            min_slices = min(mr1_array.shape[0], mr2_array.shape[0])
 
-            if not mask_path.exists():
-                print(f"Warning: Mask {mask_path} not found for image {image_file}")
-                continue  # Skip if mask doesn't exist
+            mr1_array = mr1_array[:min_slices]
+            mr2_array = mr2_array[:min_slices]
+            response = response_map.get(patient, "Unknown")
 
-            # Read only the header to get the number of slices
-            # print(image_path)
-            header = nrrd.read_header(str(image_path))
-            num_slices = header["sizes"][0]  # First dimension is slices
-
-            self.data.append((image_path, mask_path, num_slices))
-
-            # Create slice index mapping (global index → (file_idx, slice_idx))
-            for slice_idx in range(num_slices):
-                self.slice_indices.append((file_idx, slice_idx))
-
-            total_slices += num_slices
-
-        print(f"Total slices in dataset: {total_slices}")
-
-    def __getitem__(self, index):
-        file_idx, slice_idx = self.slice_indices[index]
-        image_path, mask_path, _ = self.data[file_idx]
-
-        # Load only the required slice
-        image, _ = nrrd.read(str(image_path))
-        mask, _ = nrrd.read(str(mask_path))
-
-        # slice_image = Image.fromarray(image[slice_idx, :, :].astype("float32"))#.unsqueeze(0)
-        # slice_mask = Image.fromarray(mask[slice_idx, :, :].astype("float32"))#.unsqueeze(0)
-
-        slice_image = image[slice_idx, :, :].astype("float32")  # .unsqueeze(0)
-        slice_mask = mask[slice_idx, :, :].astype("float32")  # .unsqueeze(0)
-
-        # slice_image = torch.from_numpy(slice_image.astype("float32")).unsqueeze(0)  # Shape: (1, H, W)
-        # slice_mask = torch.from_numpy(slice_mask.astype("float32")).unsqueeze(0)  # Shape: (1, H, W)
-        if self.phase == 'train':
-            transformed = train_transform(image=slice_image, mask=slice_mask)
-            slice_image = Image.fromarray(transformed['image'])
-            slice_mask = Image.fromarray(transformed['mask'])
-        else:
-            transformed = val_transform(image=slice_image, mask=slice_mask)
-            slice_image = Image.fromarray(transformed['image'])
-            slice_mask = Image.fromarray(transformed['mask'])
-
-        if self.transform:
-            slice_image = self.transform(slice_image)
-        if self.target_transform:
-            slice_mask = self.target_transform(slice_mask)
-
-        return slice_image, slice_mask
+            if response == "Unknown":
+                print("There is unknown")
+                continue
+            for slice in range(min_slices):
+                self.patient_data.append(
+                    {
+                        "MR1": mr1_array[slice],
+                        "MR2": mr2_array[slice],
+                        "response": response,
+                    }
+                )
+            self.num_slices += min_slices
 
     def __len__(self):
-        return len(self.slice_indices)
+        return self.num_slices
+
+    def __getitem__(self, idx):
+        entry = self.patient_data[idx]
+
+        mr1 = entry["MR1"]
+        mr2 = entry["MR2"]
+        response = entry["response"]  # Label (y)
+
+        mr1 = torch.tensor(mr1, dtype=torch.float32)
+        mr2 = torch.tensor(mr2, dtype=torch.float32)
+
+        if self.transforms:
+            mr1 = self.transforms(image=mr1.numpy())["image"]
+            mr2 = self.transforms(image=mr2.numpy())["image"]
+        return mr1, mr2, response
+
 
 def main():
-
-    transform_train_mask = Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Lambda(grayscale_to_rgb),
-            transforms.Lambda(normalize),
-            transforms.Resize((128, 128)),
-        ]
+    data_dir = Path("/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple")
+    batch_path = Path(
+        "/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple/batch.csv"
     )
+    response_dir = Path("/Users/luozisheng/Documents/Zhu_lab/db_20241213.xlsx")
+    phase = "train"
 
-    transform_train_image = Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Lambda(grayscale_to_rgb),
-            transforms.Lambda(normalize),
-            transforms.Resize((128, 128)),
-        ]
-    )
+    dataset = TwoPartDataset(phase=phase, transforms=train_transform_reg)
+    Dataloader = torch.utils.data.DataLoader(dataset, batch_size=3, shuffle=True)
 
-    transform_test_image = Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Lambda(grayscale_to_rgb),
-            transforms.Lambda(normalize),
-            transforms.Resize((128, 128)),
-        ]
-    )
+    for mr1_batch, mr2_batch, response_batch in Dataloader:
+        batch_size = mr1_batch.shape[0]  # Number of images in batch
+        fig, axes = plt.subplots(batch_size, 2, figsize=(6, 3 * batch_size))
 
-    transform_test_mask = Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Lambda(grayscale_to_rgb),
-            transforms.Lambda(normalize),
-            transforms.Resize((128, 128)),
-        ]
-    )
+        for i in range(batch_size):
+            ax1, ax2 = axes[i] if batch_size > 1 else (axes[0], axes[1])
+            ax1.imshow(mr1_batch[i].numpy().squeeze(), cmap="gray")
+            ax1.set_title(f"MR1 - Response: {response_batch[i].item()}")
+            ax1.axis("off")
 
-    transform_train = JointTransformTrain(
-        60, transform_image=transform_train_image, transform_mask=transform_train_mask
-    )
-    transform_test = JointTransformTest(transform_test_image, transform_test_mask)
+            ax2.imshow(mr2_batch[i].numpy().squeeze(), cmap="gray")
+            ax2.set_title(f"MR2 - Response: {response_batch[i].item()}")
+            ax2.axis("off")
 
-    # dataset_train = MRIDataset(root_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple",
-    #                            batch_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple\\batch.csv",
-    #                            phase="train", transform=transform_train)
-    #
-    # dataset_val = MRIDataset(root_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple",
-    #                          batch_dir="C:\\Users\\aaron.l\\Documents\\nrrd_images_masks_simple\\batch.csv",
-    #                          phase="val", transform=transform_test)
+        plt.tight_layout()
+        plt.show()
+        break
 
-    # print("\n🔹 Training Set Patients:", len(dataset_train))  # ✅ Counts unique patients
-    # print("🔹 Validation Set Patients:", len(dataset_val))  # ✅ Counts unique patients
-    #
-    # # ✅ Fetch a sample patient data
-    # sample_images, sample_masks = dataset_train[0]
-    #
-    # print("\n🔹 Sample Image Tensor Shape:", sample_images.shape)  # Expecting [2, H, W]
-    # print("🔹 Sample Mask Tensor Shape:", sample_masks.shape)  # Expecting [2, H, W]
-    #
-    # # ✅ Print All Patient IDs
-    # print("\n🔹 TRAINING SET: Patients")
-    # for patient in dataset_train.patients:
-    #     print(f"Patient: {patient}")
-    #
-    # print("\n🔹 VALIDATION SET: Patients")
-    # for patient in dataset_val.patients:
-    #     print(f"Patient: {patient}")
 
-if __name__ == '__main__':
-        main()
+if __name__ == "__main__":
+    main()

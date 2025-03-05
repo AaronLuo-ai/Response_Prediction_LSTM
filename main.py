@@ -1,0 +1,93 @@
+import wandb
+from pathlib import Path
+import segmentation_models_pytorch as smp
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from datetime import datetime
+import torch
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import sys
+from utils.dataloader import TwoPartDataset
+from utils.Lightening import LSTMTimeSeriesClassifier
+
+
+def main():
+
+    batch_size = 10
+    num_workers = 4
+    max_epochs = 20
+    min_epochs = 1
+    check_val_every_n_epoch = 10
+
+    train_transform_reg = A.Compose(
+        [
+            A.PadIfNeeded(min_height=256, min_width=256),
+            A.ShiftScaleRotate(
+                shift_limit=0.05, scale_limit=0.05, rotate_limit=5, p=0.5
+            ),
+            A.CenterCrop(256, 256),
+            A.Normalize(mean=[156.22], std=[132.88]),
+            ToTensorV2(),
+        ]
+    )
+
+    val_transform_reg = A.Compose(
+        [
+            A.PadIfNeeded(min_height=256, min_width=256),
+            A.Resize(256, 256),
+            A.Normalize(mean=[156.22], std=[132.88]),
+            ToTensorV2(),
+        ]
+    )
+
+    TrainDataset = TwoPartDataset(phase="train", transforms=train_transform_reg)
+    TestDataset = TwoPartDataset(phase="test", transforms=val_transform_reg)
+
+    TrainLoader = DataLoader(
+        TrainDataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+    )
+    TestLoader = DataLoader(
+        TestDataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )
+
+    # Initialize Callbacks
+    early_stopping = EarlyStopping(monitor="validation/loss", patience=40, mode="min")
+    checkpoint_callback = ModelCheckpoint(
+        monitor="validation/loss",
+        dirpath="checkpoints/",
+        filename="best-checkpoint-{epoch:02d}-{validation/loss:.4f}",
+        save_top_k=1,
+        mode="min",
+    )
+
+    model = LSTMTimeSeriesClassifier()
+
+    # Initialize WandB Logger
+    run_name = f"lstm_prediction_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_batch={batch_size}"
+    wandb_logger = WandbLogger(
+        log_model=False, project="LSTM-Prediction", name=run_name
+    )
+
+    trainer = pl.Trainer(
+        logger=wandb_logger,
+        min_epochs=min_epochs,
+        max_epochs=max_epochs,
+        callbacks=[early_stopping, checkpoint_callback],
+        num_sanity_val_steps=0,
+        check_val_every_n_epoch=check_val_every_n_epoch,
+    )
+
+    # Train and Validate
+    trainer.fit(model, TrainLoader, TestLoader)
+    trainer.validate(model, TestLoader)
+
+    # Finish WandB
+    wandb_logger.experiment.unwatch(model)
+    wandb.finish()
+
+
+if __name__ == "__main__":
+    main()

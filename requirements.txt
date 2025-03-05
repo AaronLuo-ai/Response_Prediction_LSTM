@@ -1,0 +1,8 @@
+matplotlib==3.10.1
+numpy==2.2.3
+pandas==2.2.3
+pynrrd==1.1.3
+scikit_learn==1.6.1
+segmentation_models_pytorch==0.4.0
+torch==2.5.1
+torchvision==0.15.2a0

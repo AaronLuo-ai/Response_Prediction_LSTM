@@ -1,0 +1,85 @@
+  | Name      | Type              | Params | Mode
+--------------------------------------------------------
+0 | lstm      | LSTM              | 33.8 M | train
+1 | fc        | Linear            | 129    | train
+2 | criterion | BCEWithLogitsLoss | 0      | train
+3 | accuracy  | BinaryAccuracy    | 0      | train
+4 | auroc     | BinaryAUROC       | 0      | train
+--------------------------------------------------------
+33.8 M    Trainable params
+0         Non-trainable params
+33.8 M    Total params
+135.013   Total estimated model params size (MB)
+5         Modules in train mode
+0         Modules in eval mode
+/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:420: Consider setting `persistent_workers=True` in 'train_dataloader' to speed up the dataloader worker initialization.
+Epoch 0:   0%|          | 0/44 [00:00<?, ?it/s]
+/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/fit_loop.py:310: The number of training batches (44) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+Traceback (most recent call last):
+  File "/Users/luozisheng/Documents/Zhu_lab/TimeSeriesPrediction/main.py", line 80, in <module>
+    main()
+  File "/Users/luozisheng/Documents/Zhu_lab/TimeSeriesPrediction/main.py", line 71, in main
+    trainer.fit(model, TrainLoader, TestLoader)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 539, in fit
+    call._call_and_handle_interrupt(
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/call.py", line 47, in _call_and_handle_interrupt
+    return trainer_fn(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 575, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 982, in _run
+    results = self._run_stage()
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 1026, in _run_stage
+    self.fit_loop.run()
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/fit_loop.py", line 216, in run
+    self.advance()
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/fit_loop.py", line 455, in advance
+    self.epoch_loop.run(self._data_fetcher)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 150, in run
+    self.advance(data_fetcher)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 320, in advance
+    batch_output = self.automatic_optimization.run(trainer.optimizers[0], batch_idx, kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 192, in run
+    self._optimizer_step(batch_idx, closure)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 270, in _optimizer_step
+    call._call_lightning_module_hook(
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/call.py", line 171, in _call_lightning_module_hook
+    output = fn(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/core/module.py", line 1302, in optimizer_step
+    optimizer.step(closure=optimizer_closure)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/core/optimizer.py", line 154, in step
+    step_output = self._strategy.optimizer_step(self._optimizer, closure, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/strategies/strategy.py", line 239, in optimizer_step
+    return self.precision_plugin.optimizer_step(optimizer, model=model, closure=closure, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/plugins/precision/precision.py", line 123, in optimizer_step
+    return optimizer.step(closure=closure, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/torch/optim/optimizer.py", line 487, in wrapper
+    out = func(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/torch/optim/optimizer.py", line 91, in _use_grad
+    ret = func(self, *args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/torch/optim/adam.py", line 202, in step
+    loss = closure()
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/plugins/precision/precision.py", line 109, in _wrap_closure
+    closure_result = closure()
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 146, in __call__
+    self._result = self.closure(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 131, in closure
+    step_output = self._step_fn()
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/loops/optimization/automatic.py", line 319, in _training_step
+    training_step_output = call._call_strategy_hook(trainer, "training_step", *kwargs.values())
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/trainer/call.py", line 323, in _call_strategy_hook
+    output = fn(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/pytorch_lightning/strategies/strategy.py", line 391, in training_step
+    return self.lightning_module.training_step(*args, **kwargs)
+  File "/Users/luozisheng/Documents/Zhu_lab/TimeSeriesPrediction/utils/Lightening.py", line 41, in training_step
+    loss, acc, auroc = self.common_step(batch, batch_idx)
+  File "/Users/luozisheng/Documents/Zhu_lab/TimeSeriesPrediction/utils/Lightening.py", line 51, in common_step
+    logits = self(x1, x2)  # Forward pass
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/Users/luozisheng/miniconda3/envs/seg/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/luozisheng/Documents/Zhu_lab/TimeSeriesPrediction/utils/Lightening.py", line 33, in forward
+    batch_size, H, W = x1.shape  # x1 and x2 are both (B, 256, 256)
+ValueError: too many values to unpack (expected 3)
