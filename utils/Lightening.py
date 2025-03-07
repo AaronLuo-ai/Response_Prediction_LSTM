@@ -4,6 +4,8 @@ import torch.optim as optim
 import torchmetrics
 import pytorch_lightning as pl
 import wandb
+from torchmetrics.classification import BinaryAccuracy
+import torchvision.utils as vutils
 
 
 class LSTMTimeSeriesClassifier(pl.LightningModule):
@@ -11,7 +13,7 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
         super().__init__()
 
         self.save_hyperparameters()  # Logs hyperparameters for WandB
-
+        self.lr = lr
         # Define LSTM
         self.lstm = nn.LSTM(
             input_size=256 * 256,  # Each MRI scan is flattened to 65536
@@ -19,22 +21,25 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
             num_layers=num_layers,  # Default = 2
             batch_first=True,
         )
-
         # Fully Connected Layer for Classification
         self.fc = nn.Linear(hidden_size, 1)
 
         # Loss Function
-        self.criterion = nn.BCEWithLogitsLoss()
+        self.loss_fn = nn.MSELoss()  # More stable than BCELoss
+        self.accuracy_metric = BinaryAccuracy()  # Accuracy metric using TorchMetrics
+        self.auc_metric = torchmetrics.AUROC(task="binary")
 
-        # Metrics
-        self.accuracy = torchmetrics.Accuracy(task="binary")
-        self.auroc = torchmetrics.AUROC(task="binary")
-        self.train_loss = []
-        self.val_loss = []
-        self.train_acc = []
-        self.val_acc = []
-        self.train_auroc = []
-        self.val_auroc = []
+    def on_train_epoch_start(self):
+        self.accuracy_metric.reset()
+        self.auc_metric.reset()
+
+    def on_validation_epoch_start(self):
+        self.accuracy_metric.reset()
+        self.auc_metric.reset()
+
+    def on_test_epoch_start(self):
+        self.accuracy_metric.reset()
+        self.auc_metric.reset()
 
     def forward(self, x1, x2):
         batch_size, channel, H, W = x1.shape  # x1 and x2 are both (B, 256, 256)
@@ -44,59 +49,75 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
         logits = self.fc(lstm_last_step)  # Classification output
         return logits.squeeze(1)
 
+    def _common_step(self, batch, batch_idx):
+        x1, x2, y = batch
+        scores = self.forward(x1, x2)
+        loss = self.loss_fn(
+            scores, y.float()
+        )  # Ensure labels are float for BCEWithLogitsLoss
+        return loss, scores, y, x1, x2
+
     def training_step(self, batch, batch_idx):
-        loss, acc, auroc = self.common_step(batch, batch_idx)
-        # Log loss & metrics
-        self.train_loss.append(loss)
-        self.train_acc.append(acc)
-        self.train_auroc.append(auroc)
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("train_acc", acc, prog_bar=True, on_epoch=True)
-        self.log("train_auroc", auroc, prog_bar=True, on_epoch=True)
+        loss, scores, y, _, _ = self._common_step(batch, batch_idx)
+        probs = torch.sigmoid(scores)  # Convert logits to probabilities
+
+        # Update metrics
+        self.accuracy_metric.update(probs, y.int())
+        self.auc_metric.update(probs, y.int())
+
+        self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
-    def common_step(self, batch, batch_idx):
-        x1, x2, y = batch  # Unpack batch
-        logits = self(x1, x2)  # Forward pass
-        loss = self.criterion(logits, y.float())
-        probs = torch.sigmoid(logits)  # Convert logits to probabilities
-        preds = probs > 0.5  # Binary predictions for accuracy
-        acc = self.accuracy(preds, y)
-        auroc = self.auroc(probs, y)  # Pass probabilities, not binary values
-        return loss, acc, auroc
+    def validation_step(self, batch, batch_idx):
+        loss, scores, y, x1, x2 = self._common_step(batch, batch_idx)
+        probs = torch.sigmoid(scores)
+
+        # Update metrics
+        self.accuracy_metric.update(probs, y.int())
+        self.auc_metric.update(probs, y.int())
+
+        self.log("validation/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        if isinstance(self.logger, pl.loggers.WandbLogger) and batch_idx == 0:
+            grid_input1 = vutils.make_grid(x1[:8], normalize=True, scale_each=True)
+            grid_input2 = vutils.make_grid(x2[:8], normalize=True, scale_each=True)
+            self.logger.experiment.log(
+                {
+                    "validation/input_images1": wandb.Image(
+                        grid_input1, caption="Input Images1"
+                    ),
+                    "validation/input_images2": wandb.Image(
+                        grid_input2, caption="Input Images2"
+                    ),
+                    "global_step": self.trainer.global_step,
+                }
+            )
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        loss, scores, y, _, _ = self._common_step(batch, batch_idx)
+        probs = torch.sigmoid(scores)
+
+        # Update metrics
+        self.accuracy_metric.update(probs, y.int())
+        self.auc_metric.update(probs, y.int())
+
+        self.log("test/loss", loss, on_step=False, on_epoch=True)
+        return loss
 
     def on_train_epoch_end(self):
-        avg_loss = torch.mean(torch.tensor(self.train_loss, dtype=torch.float32)).item()
-        avg_acc = torch.mean(torch.tensor(self.train_acc, dtype=torch.float32)).item()
-        avg_auroc = torch.mean(
-            torch.tensor(self.train_auroc, dtype=torch.float32)
-        ).item()
-        # Log the average metrics
-        self.log("val_loss", avg_loss, prog_bar=True)
-        self.log("val_acc", avg_acc, prog_bar=True)
-        self.log("val_auroc", avg_auroc, prog_bar=True)
-        self.train_loss.clear()
-        self.train_acc.clear()
-        self.train_auroc.clear()
-
-    def validation_step(self, batch, batch_idx):
-        loss, acc, auroc = self.common_step(batch, batch_idx)
-        self.val_loss.append(loss)
-        self.val_acc.append(acc)
-        self.val_auroc.append(auroc)
+        self.log("train/accuracy", self.accuracy_metric.compute(), prog_bar=True)
+        self.log("train/auc", self.auc_metric.compute(), prog_bar=True)
 
     def on_validation_epoch_end(self):
-        avg_loss = torch.mean(torch.tensor(self.val_loss, dtype=torch.float32)).item()
-        avg_acc = torch.mean(torch.tensor(self.val_acc, dtype=torch.float32)).item()
-        avg_auroc = torch.mean(torch.tensor(self.val_auroc, dtype=torch.float32)).item()
-        # Log the average metrics
-        self.log("val_loss", avg_loss, prog_bar=True)
-        self.log("val_acc", avg_acc, prog_bar=True)
-        self.log("val_auroc", avg_auroc, prog_bar=True)
-        self.val_loss.clear()
-        self.val_acc.clear()
-        self.val_auroc.clear()
+        self.log("validation/accuracy", self.accuracy_metric.compute(), prog_bar=True)
+        self.log("validation/auc", self.auc_metric.compute(), prog_bar=True)
+
+    def on_test_epoch_end(self):
+        self.log("test/accuracy", self.accuracy_metric.compute(), prog_bar=True)
+        self.log("test/auc", self.auc_metric.compute(), prog_bar=True)
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.hparams.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer

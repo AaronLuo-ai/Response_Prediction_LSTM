@@ -51,20 +51,23 @@ class TwoPartDataset(Dataset):
         self.transforms = transforms
 
         df = pd.read_excel(response_dir)
-        df["patient_info"] = list(zip(df["cnda_session_label"], df["Tumor Response"]))
+        df["patient_info"] = list(
+            zip(df["cnda_session_label"], df["AJCC Stage grouping "])
+        )
         new_df = df[["patient_info"]]
         pd.set_option("display.max_rows", None)
         pd.set_option("display.max_columns", None)
         new_df = new_df.drop_duplicates(subset=["patient_info"], keep="first")
+        new_df = new_df[new_df["patient_info"].apply(lambda x: not pd.isna(x[1]))]
         new_df["patient_info"] = new_df["patient_info"].apply(
-            lambda x: (x[0], 1) if x[1] == "Complete response" else (x[0], 0)
+            lambda x: (x[0], 0) if x[1] in [0, 1] else (x[0], 1)
         )
-        new_df = new_df.drop_duplicates(subset=["patient_info"], keep="first")
         csv = pd.read_csv(batch_path)
         image_files = csv["Image"].tolist()
         mr1_patients = set(f.split("_MR1")[0] for f in image_files if "MR1" in f)
         mr2_patients = set(f.split("_MR2")[0] for f in image_files if "MR2" in f)
         patients_with_both = mr1_patients.intersection(mr2_patients)
+        print("patients_with_both", sorted(patients_with_both))
         response_map = {
             "_".join(x[0].split("_")[:2]): x[1]
             for x in new_df["patient_info"]
@@ -76,11 +79,17 @@ class TwoPartDataset(Dataset):
         no_response_list = sorted(
             [patient for patient, response in response_map.items() if response == 0]
         )
+        print("response list: ", sorted(response_list))
+        print("no response list: ", sorted(no_response_list))
+        print("response list", len(response_list))
+        print("no response list", len(no_response_list))
         if phase == "train":
             response_list = response_list[: int(len(response_list) * 0.75)]
             no_response_list = no_response_list[: int(len(no_response_list) * 0.75)]
             combined_list = response_list + no_response_list
             print("Train")
+            print("response list: ", sorted(response_list))
+            print("no response list: ", sorted(no_response_list))
             print("response list", len(response_list))
             print("no response list", len(no_response_list))
         else:
@@ -88,6 +97,8 @@ class TwoPartDataset(Dataset):
             no_response_list = no_response_list[: int(len(no_response_list) * 0.75) + 1]
             combined_list = response_list + no_response_list
             print("Test")
+            print("response list: ", sorted(response_list))
+            print("no response list: ", sorted(no_response_list))
             print("response list", len(response_list))
             print("no response list", len(no_response_list))
 
@@ -148,10 +159,10 @@ def main():
         "/Users/luozisheng/Documents/Zhu_lab/nrrd_images_masks_simple/batch.csv"
     )
     response_dir = Path("/Users/luozisheng/Documents/Zhu_lab/db_20241213.xlsx")
-    phase = "train"
+    phase = "test"
 
     dataset = TwoPartDataset(phase=phase, transforms=train_transform)
-    Dataloader = torch.utils.data.DataLoader(dataset, batch_size=3, shuffle=True)
+    Dataloader = torch.utils.data.DataLoader(dataset, batch_size=10, shuffle=True)
     print("len(Dataloader)", len(Dataloader))
 
     for mr1_batch, mr2_batch, response_batch in Dataloader:

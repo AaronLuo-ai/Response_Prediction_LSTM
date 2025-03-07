@@ -9,16 +9,16 @@ from utils.dataloader import TwoPartDataset
 from utils.Lightening import LSTMTimeSeriesClassifier
 
 
-# TODO: Relabel the data. 0,1 --> Response, 2,3 --> No Response
+# TODO: Relabel the data. 0,1 --> Response, 2,3, 4 --> No Response
 
 
 def main():
 
     batch_size = 10
     num_workers = 4
-    max_epochs = 3
+    max_epochs = 100
     min_epochs = 1
-    check_val_every_n_epoch = 2
+    check_val_every_n_epoch = 5
 
     train_transform = T.Compose(
         [
@@ -48,9 +48,9 @@ def main():
     )
 
     # Initialize Callbacks
-    early_stopping = EarlyStopping(monitor="val_loss", patience=40, mode="min")
+    early_stopping = EarlyStopping(monitor="validation/loss", patience=40, mode="min")
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
+        monitor="validation/loss",
         dirpath="checkpoints/",
         filename="best-checkpoint-{epoch:02d}-{validation/loss:.4f}",
         save_top_k=1,
