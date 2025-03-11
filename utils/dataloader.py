@@ -79,10 +79,7 @@ class TwoPartDataset(Dataset):
         no_response_list = sorted(
             [patient for patient, response in response_map.items() if response == 0]
         )
-        print("response list: ", sorted(response_list))
-        print("no response list: ", sorted(no_response_list))
-        print("response list", len(response_list))
-        print("no response list", len(no_response_list))
+
         if phase == "train":
             response_list = response_list[: int(len(response_list) * 0.75)]
             no_response_list = no_response_list[: int(len(no_response_list) * 0.75)]
@@ -93,8 +90,8 @@ class TwoPartDataset(Dataset):
             print("response list", len(response_list))
             print("no response list", len(no_response_list))
         else:
-            response_list = response_list[: int(len(response_list) * 0.75) + 1]
-            no_response_list = no_response_list[: int(len(no_response_list) * 0.75) + 1]
+            response_list = response_list[int(len(response_list) * 0.75) :]
+            no_response_list = no_response_list[int(len(no_response_list) * 0.75) :]
             combined_list = response_list + no_response_list
             print("Test")
             print("response list: ", sorted(response_list))
