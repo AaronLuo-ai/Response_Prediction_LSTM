@@ -1,15 +1,12 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import segmentation_models_pytorch as smp
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 import nrrd
 import matplotlib.pyplot as plt
 import sys
 import torch
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 from torchvision.transforms import Compose
 import torchvision.transforms as T
 

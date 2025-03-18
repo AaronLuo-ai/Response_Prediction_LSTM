@@ -1,27 +1,14 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchmetrics
-import pytorch_lightning as pl
-import wandb
-from torchmetrics.classification import BinaryAccuracy
-import torchvision.utils as vutils
-from pathlib import Path
-import os
-
-from pathlib import Path
-
-encoder_weight_path = "C:\\Users\\aaron.l\\Documents\\checkpoints_segModel\\best-checkpoint-  epoch=92-validation\\loss=0.0054.ckpt"
-
+from sklearn.svm import SVC
 import torch.nn as nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
-import torch
 import torchvision.utils as vutils
 import wandb
 import torch
 from torchmetrics.classification import BinaryAccuracy
 import torchmetrics
+
+encoder_weight_path = "C:\\Users\\aaron.l\\Documents\\checkpoints_segModel\\best-checkpoint-  epoch=92-validation\\loss=0.0054.ckpt"
 
 
 class MyEncoder(nn.Module):
@@ -176,19 +163,35 @@ class LitCNN(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=1e-3)
 
 
+class Attention(nn.Module):
+    def __init__(self, hidden_size):
+        super(Attention, self).__init__()
+        self.attn = nn.Linear(hidden_size, 1, bias=False)  # Learnable attention weights
+
+    def forward(self, lstm_out):
+        """
+        lstm_out: [batch_size, sequence_length, hidden_size]
+        Returns: Weighted hidden state [batch_size, hidden_size]
+        """
+        attn_weights = torch.softmax(
+            self.attn(lstm_out), dim=1
+        )  # Compute attention scores
+        weighted_sum = torch.sum(
+            attn_weights * lstm_out, dim=1
+        )  # Apply attention weights
+        return weighted_sum
+
+
 class LSTMTimeSeriesClassifier(pl.LightningModule):
-    def __init__(self, hidden_size=128, num_layers=2, lr=1e-3):
+    def __init__(self, hidden_size=128, num_layers=2, lr=1e-3, use_attention=True):
         super().__init__()
 
         self.save_hyperparameters()  # Logs hyperparameters for WandB
         self.lr = lr
         # Define LSTM
-        self.lstm = nn.LSTM(
-            input_size=64,  # Each MRI scan is flattened to 65536 (All data including 2D data or 3D data are flattened before fed into LSTM)
-            hidden_size=hidden_size,  # Default = 128
-            num_layers=num_layers,  # Default = 2
-            batch_first=True,
-        )
+        import torch.nn as nn
+
+        lstm = nn.LSTM(input_size=11, hidden_size=128, num_layers=2, batch_first=True)
 
         segmodel = LitCNN.load_from_checkpoint(encoder_weight_path)
         encoder = segmodel.encode
@@ -204,6 +207,10 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
             param.requires_grad = False
         # Fully Connected Layer for Classification
         self.fc = nn.Linear(hidden_size, 1)
+
+        self.use_attention = use_attention  # Toggle attention usage
+        if use_attention:
+            self.attention = Attention(hidden_size)
 
         # Loss Function
         self.loss_fn = nn.MSELoss()  # More stable than BCELoss
@@ -238,9 +245,12 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
 
         # Pass through LSTM
         lstm_out, _ = self.lstm(x)  # Output shape: [batch_size, 2, hidden_size]
-        lstm_last_step = lstm_out[:, -1, :]  # Take last time step
+        if self.use_attention:
+            lstm_out = self.attention(lstm_out)  # Weighted hidden state
+        else:
+            lstm_out = lstm_out[:, -1, :]  # Default: Take last step
 
-        logits = self.fc(lstm_last_step)  # Classification output
+        logits = self.fc(lstm_out)  # Classification output
         return logits.squeeze(1)
 
     def _common_step(self, batch, batch_idx):
@@ -336,5 +346,171 @@ class LSTMTimeSeriesClassifier(pl.LightningModule):
         self.log("test/auc", self.auc_metric.compute(), prog_bar=True)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(
+            self.parameters(), lr=self.lr, weight_decay=1e-4
+        )  # L2 regularization
         return optimizer
+
+
+class RadiomicsLSTMClassifier(pl.LightningModule):
+    def __init__(
+        self,
+        input_size=11,
+        hidden_size=22,
+        num_layers=2,
+        lr=1e-3,
+        use_attention=True,
+        learning_rate=1e-3,
+    ):
+        super().__init__()
+        self.learning_rate = learning_rate  # Ensure learning rate is defined
+        self.save_hyperparameters()  # Logs hyperparameters for WandB
+        self.lr = lr
+        # Define LSTM
+
+        self.lstm = nn.LSTM(
+            input_size=input_size,  # Number of radiomics features per MRI session
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+        )
+
+        self.fc = nn.Linear(hidden_size, 1)
+
+        self.use_attention = use_attention  # Toggle attention usage
+        if use_attention:
+            self.attention = Attention(hidden_size)
+
+        # Loss Function
+        self.loss_fn = nn.MSELoss()  # More stable than BCELoss
+        self.accuracy_metric = BinaryAccuracy()  # Accuracy metric using TorchMetrics
+        self.auc_metric = torchmetrics.AUROC(task="binary")
+
+        self.preds_ = []
+        self.targets_ = []
+
+    def on_train_epoch_start(self):
+        self.accuracy_metric.reset()
+        self.auc_metric.reset()
+
+    def on_validation_epoch_start(self):
+        self.accuracy_metric.reset()
+        self.auc_metric.reset()
+
+    def on_test_epoch_start(self):
+        self.accuracy_metric.reset()
+        self.auc_metric.reset()
+
+    def _common_step(self, batch, batch_idx):
+        x, y, _ = batch
+
+        scores = self.forward(x)  # Forward pass through LSTM
+        y = y.unsqueeze(1)  # Shape: [16, 1]
+
+        loss = self.loss_fn(
+            scores, y.float()
+        )  # Ensure labels are float for BCEWithLogitsLoss
+        print("common_step loss shape: ", loss.shape)
+        print("common_step score shape: ", scores.shape)
+        print("common_step y shape: ", y.shape)
+        print("common_step x shape: ", x.shape)
+        return loss, scores, y, x
+
+    def forward(self, x):
+        """
+        Forward pass of the LSTM model.
+
+        Input:
+        - x: Tensor of shape (batch_size, sequence_length=2, input_dim)
+
+        Output:
+        - logits: Tensor of shape (batch_size, output_dim)
+        """
+        _, (h_n, _) = self.lstm(x)  # Get last hidden state
+        logits = self.fc(h_n[-1])  # Use last layer's hidden state for classification
+        return logits
+
+    def training_step(self, batch, batch_idx):
+        loss, scores, y, _ = self._common_step(batch, batch_idx)
+        probs = torch.sigmoid(scores)  # Convert logits to probabilities
+        print("loss shape: ", loss.shape)
+        print("predictions shape: ", probs.shape)
+        print("targets shape: ", y.shape)
+        print("scores shape: ", scores.shape)
+        # Update metrics
+        self.accuracy_metric.update(probs, y.int())
+        self.auc_metric.update(probs, y.int())
+
+        self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        with torch.no_grad():  # Disable gradient computation
+
+            loss, scores, y, x = self._common_step(batch, batch_idx)
+            probs = torch.sigmoid(scores)
+
+            # Ensure y has the shape [batch_size, 1]
+            if y.dim() == 3:  # If y has shape [batch_size, 1, 1]
+                y = y.squeeze(-1)  # Remove the last dimension
+
+            self.preds_.append(probs.cpu())
+            self.targets_.append(y.cpu())
+
+            # Update metrics
+            self.accuracy_metric.update(probs, y.int())
+            self.auc_metric.update(probs, y.int())
+
+            self.log(
+                "validation/loss", loss, on_step=False, on_epoch=True, prog_bar=True
+            )
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        loss, scores, y, _ = self._common_step(batch, batch_idx)
+        probs = torch.sigmoid(scores)
+        y = y.unsqueeze(1)
+        # Update metrics
+        self.accuracy_metric.update(probs, y.int())
+        self.auc_metric.update(probs, y.int())
+
+        self.log("test/loss", loss, on_step=False, on_epoch=True)
+        return loss
+
+    def on_train_epoch_end(self):
+        self.log("train/accuracy", self.accuracy_metric.compute(), prog_bar=True)
+        self.log("train/auc", self.auc_metric.compute(), prog_bar=True)
+
+    def on_validation_epoch_end(self):
+        accuracy = self.accuracy_metric.compute()
+        auc = self.auc_metric.compute()
+
+        self.log("validation/accuracy", accuracy, prog_bar=True)
+        self.log("validation/auc", auc, prog_bar=True)
+
+        # # Concatenate stored predictions & targets
+        # print(self.preds_)
+        # print(self.targets_)
+        preds_s = torch.cat(self.preds_, dim=0)
+        targets_s = torch.cat(self.targets_, dim=0)
+
+        # Log to WandB
+        self.logger.log_table(
+            key="validation/predictions_vs_ground_truth",
+            columns=["Ground Truth", "Predictions"],
+            data=list(zip(targets_s.cpu().numpy(), preds_s.cpu().numpy())),
+        )
+
+        # Reset stored predictions & targets
+        self.preds_.clear()
+        self.targets_.clear()
+
+    def on_test_epoch_end(self):
+        self.log("test/accuracy", self.accuracy_metric.compute(), prog_bar=True)
+        self.log("test/auc", self.auc_metric.compute(), prog_bar=True)
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(
+            self.parameters(), lr=self.learning_rate, weight_decay=1e-4
+        )

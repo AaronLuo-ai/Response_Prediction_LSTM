@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="caffe" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="seg" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="lstm_prediction" project-jdk-type="Python SDK" />
 </project>
